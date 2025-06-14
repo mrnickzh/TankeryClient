@@ -9,6 +9,7 @@
 #include <rlgl.h>
 #include <raymath.h>
 
+#include "Utils/tppcamera.h"
 #include "Event/EventBus.hpp"
 #include "Event/Events/TickEvent.hpp"
 #include "Objects/MeshObject.hpp"
@@ -64,12 +65,24 @@ void setupAndRender() {
 }
 
 void mainLoop() {
-    UpdateCamera(&camera, CAMERA_THIRD_PERSON);
-    BeginDrawing();
-    ClearBackground(RAYWHITE);
+    UpdateTPPCamera(&camera, CAMERA_THIRD_PERSON);
 
     auto cv = Main::localTank->velocity;
     auto cp = Main::localTank->position;
+    if (IsKeyDown(KEY_W)) {
+        if (cv->velocity.z > -0.1 && cv->velocity.x > -0.1) { cv->velocity.z += 0.002; cv->velocity.x += 0.002; }
+    }
+    if (IsKeyDown(KEY_S)) {
+        if (cv->velocity.z < 0.1 && cv->velocity.x < 0.01) { cv->velocity.z -= 0.002; cv->velocity.x -= 0.002; }
+    }
+    if (IsKeyDown(KEY_A)) { cp->rotation.y += 0.05; if (cp->rotation.y > 360.0f) { cp->rotation.y -= 360.0f; } }
+    if (IsKeyDown(KEY_D)) { cp->rotation.y -= 0.05; if (cp->rotation.y < 0.0f) { cp->rotation.y += 360.0f; }}
+    if (IsKeyDown(KEY_SPACE)) { cv->velocity.y += 0.002; }
+    if (IsKeyDown(KEY_LEFT_SHIFT)) { cv->velocity.y -= 0.002; }
+
+    BeginDrawing();
+    ClearBackground(RAYWHITE);
+
     std::string velocityText = "Velocity x: " + std::to_string(cv->velocity.x) +
                            " y: " + std::to_string(cv->velocity.y) +
                            " z: " + std::to_string(cv->velocity.z);
@@ -84,10 +97,9 @@ void mainLoop() {
     DrawText(positionText.c_str(), 10, 20, 10, BLACK);
     DrawText(rotationText.c_str(), 10, 30, 10, BLACK);
 
-    BeginMode3D(camera);
+    camera.target = Main::localTank->position->position;
 
-    auto poscomp = Main::localTank->position;
-    camera.target = poscomp->position;
+    BeginMode3D(camera);
 
     setupAndRender();
 
@@ -102,6 +114,61 @@ int main() {
     emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_FALSE, onResize);
     emscripten_request_pointerlock("canvas", EM_TRUE);
 
+    L_SUBSCRIBE(TickEvent, [](TickEvent* event) {
+        bool collided = false;
+
+        auto cv = Main::localTank->velocity;
+        auto cp = Main::localTank->position;
+        cv->prev_velocity = cv->velocity;
+
+        float yawRad = cp->rotation.y * DEG2RAD;
+        float dx = std::sin(yawRad);
+        float dz = std::cos(yawRad);
+
+        cp->prevPosition = cp->position;
+
+        float tmpx = cp->position.x + cv->velocity.x * dz;
+        float tmpz = cp->position.z + cv->velocity.z * -dx;
+        float tmpy = cp->position.y + cv->velocity.y;
+
+        for (auto& obj : Main::map) {
+            if (CheckCollisionBoxes(
+            (BoundingBox){(Vector3){ tmpx - 1.0f/2,
+                                     tmpy - 1.0f/2,
+                                     tmpz - 1.0f/2 },
+                          (Vector3){ tmpx + 1.0f/2,
+                                     tmpy + 1.0f/2,
+                                     tmpz + 1.0f/2 }},
+            (BoundingBox){(Vector3){ obj->position.x - 1.0f/2,
+                                     obj->position.y - 1.0f/2,
+                                     obj->position.z - 1.0f/2 },
+                          (Vector3){ obj->position.x + 1.0f/2,
+                                     obj->position.y + 1.0f/2,
+                                     obj->position.z + 1.0f/2 }})) { collided = true; cv->velocity = Vector3(0, 0, 0); }
+        }
+
+        if (!collided) {
+            cp->position.x = tmpx;
+            cp->position.z = tmpz;
+            cp->position.y = tmpy;
+            camera.position = Vector3Add(camera.position, (Vector3){ cv->velocity.x * dz, cv->velocity.y,  cv->velocity.z * -dx });
+        }
+
+        if (cv->velocity.x < 0) { cv->velocity.x += 0.001; }
+        if (cv->velocity.x > 0) { cv->velocity.x -= 0.001; }
+        if (cv->velocity.x < 0.001 && cv->velocity.x > -0.001) { cv->velocity.x = 0; }
+
+        if (cv->velocity.z < 0) { cv->velocity.z += 0.001; }
+        if (cv->velocity.z > 0) { cv->velocity.z -= 0.001; }
+        if (cv->velocity.z < 0.001 && cv->velocity.z > -0.001) { cv->velocity.z = 0; }
+
+        if (cv->velocity.y < 0) { cv->velocity.y += 0.001; }
+        if (cv->velocity.y > 0) { cv->velocity.y -= 0.001; }
+        if (cv->velocity.y < 0.001 && cv->velocity.y > -0.001) { cv->velocity.y = 0; }
+
+        //calculatevelocity();
+    });
+
     PacketHelper::registerPacket(0, []() { return new HandShakePacket(); });
     PacketHelper::registerPacket(1, []() { return new AddMapObject(); });
     PacketHelper::registerPacket(2, []() { return new EntityAction(); });
@@ -109,7 +176,7 @@ int main() {
 
     InitWindow(windowWidth, windowHeight, "TankeryOnlineClient");
 
-    camera.position = (Vector3){ -1.0f, 1.0f, 0.0f };
+    camera.position = (Vector3){ -10.0f, 5.0f, 0.0f };
     camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
     camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
     camera.fovy = 45.0f;
@@ -143,6 +210,7 @@ int main() {
     });
 
     Main::localTank = new LocalTank();
+    Main::localTank->position->position.y = 1.0f;
 
     emscripten_set_main_loop(mainLoop, 0, 1);
     ticklooprunning = false;
