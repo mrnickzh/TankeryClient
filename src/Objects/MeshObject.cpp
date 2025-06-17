@@ -7,5 +7,5 @@
 
 void MeshObject::render() {
     meshmodel.transform = MatrixMultiply(MatrixRotateXYZ(rotation * DEG2RAD), meshmodel.transform);
-    DrawModel(meshmodel, position, 1.0f, RED);
+    DrawModel(meshmodel, position, 1.0f, meshcolor);
 }

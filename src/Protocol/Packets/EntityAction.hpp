@@ -13,7 +13,11 @@ public:
         if (action == 0) {
             std::shared_ptr<Entity> e = std::make_shared<Entity>();
             e->uuid = uuidStr;
-            Main::entities.push_back(e);
+            if (std::find_if(Main::entities.begin(), Main::entities.end(), [uuidStr](std::shared_ptr<Entity> f)->bool{ return (*f).uuid == uuidStr; }) == Main::entities.end()) {
+                Main::entities.push_back(e);
+                std::cout << e->uuid << " uuid" << std::endl;
+                std::cout << Main::entities.size() << std::endl;
+            }
         } else if (action == 1) {
             auto &entities = Main::entities;
             entities.erase(

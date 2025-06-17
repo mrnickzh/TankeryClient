@@ -19,12 +19,47 @@
 #include "Protocol/Packets/AddMapObject.hpp"
 #include "Protocol/Packets/EntityAction.hpp"
 #include "Protocol/Packets/HandShakePacket.hpp"
+#include "Protocol/Packets/PlayerAuthInput.hpp"
 
 int windowWidth = 800;
 int windowHeight = 600;
 
 Camera3D camera = { 0 };
 Model cubeModel;
+
+void calculatevelocity() {
+    for (auto e : Main::entities) {
+        auto cv = e->velocity;
+        auto cp = e->position;
+        cv->prev_velocity = cv->velocity;
+
+        float yawRad = cp->rotation.y * DEG2RAD;
+        float dx = std::sin(yawRad);
+        float dz = std::cos(yawRad);
+
+        cp->prevPosition = cp->position;
+
+        float tmpx = cp->position.x + cv->velocity.x * dz;
+        float tmpz = cp->position.z + cv->velocity.z * -dx;
+        float tmpy = cp->position.y + cv->velocity.y;
+
+        cp->position.x = tmpx;
+        cp->position.z = tmpz;
+        cp->position.y = tmpy;
+
+        if (cv->velocity.x < 0) { cv->velocity.x += 0.001; }
+        if (cv->velocity.x > 0) { cv->velocity.x -= 0.001; }
+        if (cv->velocity.x < 0.001 && cv->velocity.x > -0.001) { cv->velocity.x = 0; }
+
+        if (cv->velocity.z < 0) { cv->velocity.z += 0.001; }
+        if (cv->velocity.z > 0) { cv->velocity.z -= 0.001; }
+        if (cv->velocity.z < 0.001 && cv->velocity.z > -0.001) { cv->velocity.z = 0; }
+
+        if (cv->velocity.y < 0) { cv->velocity.y += 0.001; }
+        if (cv->velocity.y > 0) { cv->velocity.y -= 0.001; }
+        if (cv->velocity.y < 0.001 && cv->velocity.y > -0.001) { cv->velocity.y = 0; }
+    }
+}
 
 EM_BOOL onResize(int, const EmscriptenUiEvent* e, void*) {
     windowWidth = e->windowInnerWidth;
@@ -36,12 +71,12 @@ EM_BOOL onResize(int, const EmscriptenUiEvent* e, void*) {
 void setupAndRender() {
     Main::objects.insert(Main::objects.end(), Main::map.begin(), Main::map.end());
     auto p = Main::localTank->position;
-    Main::localTankObject = std::make_shared<MeshObject>(p->rotation, p->position, std::make_shared<Model>(cubeModel));
+    Main::localTankObject = std::make_shared<MeshObject>(p->rotation, p->position, std::make_shared<Model>(cubeModel), BLUE);
     Main::objects.push_back(Main::localTankObject);
 
     for (auto& e : Main::entities) {
         auto pos = e->position;
-        Main::objects.push_back(std::make_shared<MeshObject>(pos->rotation, pos->position, std::make_shared<Model>(cubeModel)));
+        Main::objects.push_back(std::make_shared<MeshObject>(pos->rotation, pos->position, std::make_shared<Model>(cubeModel), BLUE));
     }
 
     float camX = camera.position.x, camY = camera.position.y, camZ = camera.position.z;
@@ -69,16 +104,18 @@ void mainLoop() {
 
     auto cv = Main::localTank->velocity;
     auto cp = Main::localTank->position;
+    bool moved = false;
     if (IsKeyDown(KEY_W)) {
-        if (cv->velocity.z > -0.1 && cv->velocity.x > -0.1) { cv->velocity.z += 0.002; cv->velocity.x += 0.002; }
+        if (cv->velocity.z > -0.1 && cv->velocity.x > -0.1) { cv->velocity.z += 0.002; cv->velocity.x += 0.002; moved = true; }
     }
     if (IsKeyDown(KEY_S)) {
-        if (cv->velocity.z < 0.1 && cv->velocity.x < 0.01) { cv->velocity.z -= 0.002; cv->velocity.x -= 0.002; }
+        if (cv->velocity.z < 0.1 && cv->velocity.x < 0.01) { cv->velocity.z -= 0.002; cv->velocity.x -= 0.002; moved = true; }
     }
-    if (IsKeyDown(KEY_A)) { cp->rotation.y += 0.05; if (cp->rotation.y > 360.0f) { cp->rotation.y -= 360.0f; } }
-    if (IsKeyDown(KEY_D)) { cp->rotation.y -= 0.05; if (cp->rotation.y < 0.0f) { cp->rotation.y += 360.0f; }}
-    if (IsKeyDown(KEY_SPACE)) { cv->velocity.y += 0.002; }
-    if (IsKeyDown(KEY_LEFT_SHIFT)) { cv->velocity.y -= 0.002; }
+    if (IsKeyDown(KEY_A)) { cp->rotation.y += 0.05; if (cp->rotation.y > 360.0f) { cp->rotation.y -= 360.0f; } moved = true; }
+    if (IsKeyDown(KEY_D)) { cp->rotation.y -= 0.05; if (cp->rotation.y < 0.0f) { cp->rotation.y += 360.0f; } moved = true; }
+    if (IsKeyDown(KEY_SPACE)) { cv->velocity.y += 0.002; moved = true; }
+    if (IsKeyDown(KEY_LEFT_SHIFT)) { cv->velocity.y -= 0.002; moved = true; }
+    if (moved) { PlayerAuthInput pkt; SocketClient::sendPacket(&pkt); std::cout << "PAI sent" << std::endl; }
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
@@ -166,12 +203,13 @@ int main() {
         if (cv->velocity.y > 0) { cv->velocity.y -= 0.001; }
         if (cv->velocity.y < 0.001 && cv->velocity.y > -0.001) { cv->velocity.y = 0; }
 
-        //calculatevelocity();
+        calculatevelocity();
     });
 
     PacketHelper::registerPacket(0, []() { return new HandShakePacket(); });
     PacketHelper::registerPacket(1, []() { return new AddMapObject(); });
     PacketHelper::registerPacket(2, []() { return new EntityAction(); });
+    PacketHelper::registerPacket(3, []() { return new PlayerAuthInput(); });
     SocketClient::connect();
 
     InitWindow(windowWidth, windowHeight, "TankeryOnlineClient");

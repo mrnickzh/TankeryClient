@@ -20,7 +20,7 @@ class AddMapObject : public Packet {
             case 0:
                 Mesh cubeMesh = GenMeshCube(1.0f,1.0f,1.0f);
                 Model cubeModel = LoadModelFromMesh(cubeMesh);
-                Main::map.push_back(std::make_shared<MeshObject>(rotation,  position, std::make_shared<Model>(cubeModel)));
+                Main::map.push_back(std::make_shared<MeshObject>(rotation,  position, std::make_shared<Model>(cubeModel), RED));
                 break;
         }
     }
