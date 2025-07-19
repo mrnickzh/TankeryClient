@@ -9,27 +9,28 @@ public:
        std::string uuid = buffer.readString();
        for (auto& e : Main::entities) {
            if (e->uuid == uuid) {
-               e->position->position = Vector3(buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
-               e->position->rotation = Vector3(buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
-               e->velocity->velocity = Vector3(buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
-               std::cout << e->velocity->velocity.x << " " << e->velocity->velocity.y << " " << e->velocity->velocity.z << std::endl;
+               auto epos = Vector3(buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
+               auto erot = Vector3(buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
+               auto evel = Vector3(buffer.readFloat(), buffer.readFloat(), buffer.readFloat());
+               Main::physicsEngine.set_body_position(e->object->bodyid, epos);
+               Main::physicsEngine.set_body_rotation(e->object->bodyid, erot);
+               Main::physicsEngine.set_dynamic_linear_velocity(e->object->bodyid, evel);
            }
        }
     }
 
     void send(ByteBuf &buffer) override {
-        buffer.writeFloat(Main::localTank->position->position.x);
-        buffer.writeFloat(Main::localTank->position->position.y);
-        buffer.writeFloat(Main::localTank->position->position.z);
+        buffer.writeFloat(Main::localTank->object->position.x);
+        buffer.writeFloat(Main::localTank->object->position.y);
+        buffer.writeFloat(Main::localTank->object->position.z);
 
-        buffer.writeFloat(Main::localTank->position->rotation.x);
-        buffer.writeFloat(Main::localTank->position->rotation.y);
-        buffer.writeFloat(Main::localTank->position->rotation.z);
+        buffer.writeFloat(Main::localTank->object->rotation.x);
+        buffer.writeFloat(Main::localTank->object->rotation.y);
+        buffer.writeFloat(Main::localTank->object->rotation.z);
 
-        std::cout << Main::localTank->velocity->velocity.x << " " << Main::localTank->velocity->velocity.y << " " << Main::localTank->velocity->velocity.z << " " << std::endl;
-
-        buffer.writeFloat(Main::localTank->velocity->velocity.x);
-        buffer.writeFloat(Main::localTank->velocity->velocity.y);
-        buffer.writeFloat(Main::localTank->velocity->velocity.z);
+        auto vel = Main::physicsEngine.get_dynamic_linear_velocity(Main::localTank->object->bodyid);
+        buffer.writeFloat(vel.x);
+        buffer.writeFloat(vel.y);
+        buffer.writeFloat(vel.z);
     }
 };

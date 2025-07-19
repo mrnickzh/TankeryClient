@@ -13,6 +13,8 @@ public:
         if (action == 0) {
             std::shared_ptr<Entity> e = std::make_shared<Entity>();
             e->uuid = uuidStr;
+            e->object = std::make_shared<DynamicObject>(Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 0.0f), std::make_shared<Model>(LoadModelFromMesh(GenMeshCube(1.0f,1.0f,1.0f))), BLUE);
+            e->object->create_physics();
             if (std::find_if(Main::entities.begin(), Main::entities.end(), [uuidStr](std::shared_ptr<Entity> f)->bool{ return (*f).uuid == uuidStr; }) == Main::entities.end()) {
                 Main::entities.push_back(e);
                 std::cout << e->uuid << " uuid" << std::endl;

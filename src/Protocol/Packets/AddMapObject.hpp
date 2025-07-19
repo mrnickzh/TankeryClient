@@ -2,7 +2,8 @@
 
 #include "../Packet.hpp"
 #include "../../main.hpp"
-#include "../../Objects/MeshObject.hpp"
+#include "../../Objects/StaticObject.hpp"
+#include "../../Objects/FloorObject.hpp"
 
 class AddMapObject : public Packet {
     void receive(ByteBuf &buffer) override {
@@ -17,11 +18,23 @@ class AddMapObject : public Packet {
         rotation.z = buffer.readFloat();
 
         switch (id) {
-            case 0:
-                Mesh cubeMesh = GenMeshCube(1.0f,1.0f,1.0f);
+            case 0: {
+                Mesh cubeMesh = GenMeshCube(1.0f, 1.0f, 1.0f);
                 Model cubeModel = LoadModelFromMesh(cubeMesh);
-                Main::map.push_back(std::make_shared<MeshObject>(rotation,  position, std::make_shared<Model>(cubeModel), RED));
+                std::shared_ptr<StaticObject> staticObject = std::make_shared<StaticObject>(
+                    rotation, position, std::make_shared<Model>(cubeModel), RED);
+                staticObject->create_physics();
+                Main::map.push_back(staticObject);
+            }
                 break;
+            case 1: {
+                Mesh floorMesh = GenMeshCube(100.0f,1.0f,100.0f);
+                Model floorModel = LoadModelFromMesh(floorMesh);
+                std::shared_ptr<FloorObject> floorObject = std::make_shared<FloorObject>(Vector3(0.0f, 0.0f, 0.0f),  Vector3(0.0f, -1.0f, 0.0f), std::make_shared<Model>(floorModel), GREEN);
+                floorObject->create_physics();
+                Main::map.push_back(floorObject);
+                break;
+            }
         }
     }
     void send(ByteBuf &buffer) override {}

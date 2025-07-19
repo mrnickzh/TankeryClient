@@ -9,10 +9,17 @@
 #include <rlgl.h>
 #include <raymath.h>
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <queue>
+#include <string>
+
 #include "Utils/tppcamera.h"
 #include "Event/EventBus.hpp"
 #include "Event/Events/TickEvent.hpp"
-#include "Objects/MeshObject.hpp"
+#include "Objects/DynamicObject.hpp"
+#include "Objects/StaticObject.hpp"
 #include "Objects/Object.hpp"
 #include "Protocol/PacketHelper.hpp"
 #include "Protocol/Socket.hpp"
@@ -27,39 +34,7 @@ int windowHeight = 600;
 Camera3D camera = { 0 };
 Model cubeModel;
 
-void calculatevelocity() {
-    for (auto e : Main::entities) {
-        auto cv = e->velocity;
-        auto cp = e->position;
-        cv->prev_velocity = cv->velocity;
-
-        float yawRad = cp->rotation.y * DEG2RAD;
-        float dx = std::sin(yawRad);
-        float dz = std::cos(yawRad);
-
-        cp->prevPosition = cp->position;
-
-        float tmpx = cp->position.x + cv->velocity.x * dz;
-        float tmpz = cp->position.z + cv->velocity.z * -dx;
-        float tmpy = cp->position.y + cv->velocity.y;
-
-        cp->position.x = tmpx;
-        cp->position.z = tmpz;
-        cp->position.y = tmpy;
-
-        if (cv->velocity.x < 0) { cv->velocity.x += 0.001; }
-        if (cv->velocity.x > 0) { cv->velocity.x -= 0.001; }
-        if (cv->velocity.x < 0.001 && cv->velocity.x > -0.001) { cv->velocity.x = 0; }
-
-        if (cv->velocity.z < 0) { cv->velocity.z += 0.001; }
-        if (cv->velocity.z > 0) { cv->velocity.z -= 0.001; }
-        if (cv->velocity.z < 0.001 && cv->velocity.z > -0.001) { cv->velocity.z = 0; }
-
-        if (cv->velocity.y < 0) { cv->velocity.y += 0.001; }
-        if (cv->velocity.y > 0) { cv->velocity.y -= 0.001; }
-        if (cv->velocity.y < 0.001 && cv->velocity.y > -0.001) { cv->velocity.y = 0; }
-    }
-}
+double tickTimer = 0.0f;
 
 EM_BOOL onResize(int, const EmscriptenUiEvent* e, void*) {
     windowWidth = e->windowInnerWidth;
@@ -70,13 +45,10 @@ EM_BOOL onResize(int, const EmscriptenUiEvent* e, void*) {
 
 void setupAndRender() {
     Main::objects.insert(Main::objects.end(), Main::map.begin(), Main::map.end());
-    auto p = Main::localTank->position;
-    Main::localTankObject = std::make_shared<MeshObject>(p->rotation, p->position, std::make_shared<Model>(cubeModel), BLUE);
-    Main::objects.push_back(Main::localTankObject);
+    Main::objects.push_back(Main::localTank->object);
 
     for (auto& e : Main::entities) {
-        auto pos = e->position;
-        Main::objects.push_back(std::make_shared<MeshObject>(pos->rotation, pos->position, std::make_shared<Model>(cubeModel), BLUE));
+        Main::objects.push_back(e->object);
     }
 
     float camX = camera.position.x, camY = camera.position.y, camZ = camera.position.z;
@@ -92,6 +64,7 @@ void setupAndRender() {
                   return distA > distB;
               });
     for (const auto& object : sortedObjects) {
+        Main::physicsEngine.update(GetFrameTime(), object->position, object->rotation, object->bodyid);
         object->render();
     }
     Main::objects.clear();
@@ -102,39 +75,37 @@ void setupAndRender() {
 void mainLoop() {
     UpdateTPPCamera(&camera, CAMERA_THIRD_PERSON);
 
-    auto cv = Main::localTank->velocity;
-    auto cp = Main::localTank->position;
+    auto bodyid = Main::localTank->object->bodyid;
+    auto cv = Main::physicsEngine.get_dynamic_linear_velocity(bodyid);
+    auto cp = Main::physicsEngine.get_body_position(bodyid);
+    auto cr = Main::physicsEngine.get_body_rotation(bodyid);
     bool moved = false;
+
     if (IsKeyDown(KEY_W)) {
-        if (cv->velocity.z > -0.1 && cv->velocity.x > -0.1) { cv->velocity.z += 0.002; cv->velocity.x += 0.002; moved = true; }
+        if (cv.z < 5.0f && cv.x < 5.0f) { Main::physicsEngine.add_dynamic_linear_velocity_with_rotation(bodyid, Vector3(0.1f, 0.0f, 0.1f), cr); moved = true; }
     }
     if (IsKeyDown(KEY_S)) {
-        if (cv->velocity.z < 0.1 && cv->velocity.x < 0.01) { cv->velocity.z -= 0.002; cv->velocity.x -= 0.002; moved = true; }
+        if (cv.z > -5.0f && cv.x > -5.0f) { Main::physicsEngine.add_dynamic_linear_velocity_with_rotation(bodyid, Vector3(-0.1f, 0.0f, -0.1f), cr); moved = true; }
     }
-    if (IsKeyDown(KEY_A)) { cp->rotation.y += 0.05; if (cp->rotation.y > 360.0f) { cp->rotation.y -= 360.0f; } moved = true; }
-    if (IsKeyDown(KEY_D)) { cp->rotation.y -= 0.05; if (cp->rotation.y < 0.0f) { cp->rotation.y += 360.0f; } moved = true; }
-    if (IsKeyDown(KEY_SPACE)) { cv->velocity.y += 0.002; moved = true; }
-    if (IsKeyDown(KEY_LEFT_SHIFT)) { cv->velocity.y -= 0.002; moved = true; }
+    if (IsKeyDown(KEY_A)) { Main::physicsEngine.set_body_rotation(bodyid, Vector3(cr.x, cr.y + 0.1f, cr.z)); moved = true; }
+    if (IsKeyDown(KEY_D)) { Main::physicsEngine.set_body_rotation(bodyid, Vector3(cr.x, cr.y - 0.1f, cr.z)); moved = true; }
     if (moved) { PlayerAuthInput pkt; SocketClient::sendPacket(&pkt); std::cout << "PAI sent" << std::endl; }
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
 
-    std::string velocityText = "Velocity x: " + std::to_string(cv->velocity.x) +
-                           " y: " + std::to_string(cv->velocity.y) +
-                           " z: " + std::to_string(cv->velocity.z);
-
-    std::string positionText = "Position x: " + std::to_string(cp->position.x) +
-                       " y: " + std::to_string(cp->position.y) +
-                       " z: " + std::to_string(cp->position.z);
-    std::string rotationText = "Rotation x: " + std::to_string(cp->rotation.x) +
-                       " y: " + std::to_string(cp->rotation.y) +
-                       " z: " + std::to_string(cp->rotation.z);
+    std::string velocityText = "Velocity x: " + std::to_string(cv.x) +
+                           " y: " + std::to_string(cv.y) +
+                           " z: " + std::to_string(cv.z);
+    std::string positionText = "Position x: " + std::to_string(cp.x) +
+                       " y: " + std::to_string(cp.y) +
+                       " z: " + std::to_string(cp.z);
+    std::string rotationText = "Rotation x: " + std::to_string(cr.x) +
+                       " y: " + std::to_string(cr.y) +
+                       " z: " + std::to_string(cr.z);
     DrawText(velocityText.c_str(), 10, 10, 10, BLACK);
     DrawText(positionText.c_str(), 10, 20, 10, BLACK);
     DrawText(rotationText.c_str(), 10, 30, 10, BLACK);
-
-    camera.target = Main::localTank->position->position;
 
     BeginMode3D(camera);
 
@@ -142,68 +113,23 @@ void mainLoop() {
 
     EndMode3D();
     EndDrawing();
+
+    auto cpd = Main::physicsEngine.get_body_position(bodyid) - cp;
+    camera.target = cp;
+    camera.position = Vector3(camera.position.x + cpd.x, camera.position.y + cpd.y, camera.position.z + cpd.z);
 }
 
 int main() {
     bool ticklooprunning = true;
+
+    Main::physicsEngine.initialise();
+    Main::physicsEngine.start_simulation();
 
     emscripten_get_canvas_element_size("#canvas", &windowWidth, &windowHeight);
     emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_FALSE, onResize);
     emscripten_request_pointerlock("canvas", EM_TRUE);
 
     L_SUBSCRIBE(TickEvent, [](TickEvent* event) {
-        bool collided = false;
-
-        auto cv = Main::localTank->velocity;
-        auto cp = Main::localTank->position;
-        cv->prev_velocity = cv->velocity;
-
-        float yawRad = cp->rotation.y * DEG2RAD;
-        float dx = std::sin(yawRad);
-        float dz = std::cos(yawRad);
-
-        cp->prevPosition = cp->position;
-
-        float tmpx = cp->position.x + cv->velocity.x * dz;
-        float tmpz = cp->position.z + cv->velocity.z * -dx;
-        float tmpy = cp->position.y + cv->velocity.y;
-
-        for (auto& obj : Main::map) {
-            if (CheckCollisionBoxes(
-            (BoundingBox){(Vector3){ tmpx - 1.0f/2,
-                                     tmpy - 1.0f/2,
-                                     tmpz - 1.0f/2 },
-                          (Vector3){ tmpx + 1.0f/2,
-                                     tmpy + 1.0f/2,
-                                     tmpz + 1.0f/2 }},
-            (BoundingBox){(Vector3){ obj->position.x - 1.0f/2,
-                                     obj->position.y - 1.0f/2,
-                                     obj->position.z - 1.0f/2 },
-                          (Vector3){ obj->position.x + 1.0f/2,
-                                     obj->position.y + 1.0f/2,
-                                     obj->position.z + 1.0f/2 }})) { collided = true; cv->velocity = Vector3(0, 0, 0); }
-        }
-
-        if (!collided) {
-            cp->position.x = tmpx;
-            cp->position.z = tmpz;
-            cp->position.y = tmpy;
-            camera.position = Vector3Add(camera.position, (Vector3){ cv->velocity.x * dz, cv->velocity.y,  cv->velocity.z * -dx });
-        }
-
-        if (cv->velocity.x < 0) { cv->velocity.x += 0.001; }
-        if (cv->velocity.x > 0) { cv->velocity.x -= 0.001; }
-        if (cv->velocity.x < 0.001 && cv->velocity.x > -0.001) { cv->velocity.x = 0; }
-
-        if (cv->velocity.z < 0) { cv->velocity.z += 0.001; }
-        if (cv->velocity.z > 0) { cv->velocity.z -= 0.001; }
-        if (cv->velocity.z < 0.001 && cv->velocity.z > -0.001) { cv->velocity.z = 0; }
-
-        if (cv->velocity.y < 0) { cv->velocity.y += 0.001; }
-        if (cv->velocity.y > 0) { cv->velocity.y -= 0.001; }
-        if (cv->velocity.y < 0.001 && cv->velocity.y > -0.001) { cv->velocity.y = 0; }
-
-        calculatevelocity();
     });
 
     PacketHelper::registerPacket(0, []() { return new HandShakePacket(); });
@@ -248,7 +174,9 @@ int main() {
     });
 
     Main::localTank = new LocalTank();
-    Main::localTank->position->position.y = 1.0f;
+    Main::localTank->object = std::make_shared<DynamicObject>(Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 5.0f, 0.0f), std::make_shared<Model>(cubeModel), BLUE);
+    Main::localTank->object->create_physics();
+
 
     emscripten_set_main_loop(mainLoop, 0, 1);
     ticklooprunning = false;
@@ -257,3 +185,4 @@ int main() {
 
     return 0;
 }
+
