@@ -1,12 +1,14 @@
 #pragma once
 #include "../Entity.hpp"
-#include "Components/PartsHealth.hpp"
+#include "../../Objects/ArmorObject.hpp"
 
 class LocalTank : public Entity {
 public:
-    PartsHealth* health;
+    std::vector<std::shared_ptr<ArmorObject>> armorplates;
 
-    LocalTank() : Entity() {
-        health = new PartsHealth(100, 100, 100, 100, 100);
+    LocalTank() : Entity() {}
+
+    void add_armor(std::shared_ptr<ArmorObject> armor) {
+        armorplates.push_back(armor);
     }
 };

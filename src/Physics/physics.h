@@ -1,5 +1,4 @@
-#ifndef SRC_PHYSICS_H
-#define SRC_PHYSICS_H
+#pragma once
 
 // The Jolt headers don't include Jolt.h. Always include Jolt.h before including
 // any other Jolt header. You can use Jolt.h in your precompiled header to speed
@@ -214,18 +213,28 @@ public:
     JPH::BodyID create_dynamic(const Vector3 &dynamic_dimensions,
                         const Vector3 &dynamic_positon,
                         const Vector3 &dynamic_rotation);
-    void set_dynamic_linear_velocity(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity);
-    void set_dynamic_angular_velocity(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity);
-    void add_dynamic_linear_velocity(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity);
-    void add_dynamic_angular_velocity(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity);
+    JPH::BodyID create_kinematic(const Vector3 &kinematic_dimensions,
+                        const Vector3 &kinematic_positon,
+                        const Vector3 &kinematic_rotation);
+    JPH::BodyID create_sensor(const Vector3 &sensor_dimensions,
+                        const Vector3 &sensor_positon,
+                        const Vector3 &sensor_rotation);
+    void create_hinge(const Vector3 &hinge_position,
+                                const JPH::BodyID &body1_id,
+                                const JPH::BodyID &body2_id, int hingeaxis, int normalaxis);
+    void set_dynamic_linear_velocity(JPH::BodyID dynamicid, Vector3 dynamic_velocity);
+    void set_dynamic_angular_velocity(JPH::BodyID dynamicid, Vector3 dynamic_velocity);
+    void add_dynamic_linear_velocity(JPH::BodyID dynamicid, Vector3 dynamic_velocity);
+    void add_dynamic_angular_velocity(JPH::BodyID dynamicid, Vector3 dynamic_velocity);
     Vector3 get_dynamic_linear_velocity(JPH::BodyID dynamicid);
     Vector3 get_dynamic_angular_velocity(JPH::BodyID dynamicid);
-    void set_body_position(JPH::BodyID bodyid, const Vector3 &position);
-    void set_body_rotation(JPH::BodyID bodyid, const Vector3 &position);
-    Vector3 get_body_position(JPH::BodyID dynamicid);
-    Vector3 get_body_rotation(JPH::BodyID dynamicid);
-    void set_dynamic_linear_velocity_with_rotation(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity, const Vector3 &dynamic_rotation);
-    void add_dynamic_linear_velocity_with_rotation(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity, const Vector3 &dynamic_rotation);
+    void set_body_position(JPH::BodyID bodyid, Vector3 position);
+    void set_body_rotation(JPH::BodyID bodyid, Vector3 rotation);
+    Vector3 get_body_position(JPH::BodyID bodyid);
+    Vector3 get_body_rotation(JPH::BodyID bodyid);
+    Vector3 get_body_cofm(JPH::BodyID bodyid);
+    void set_dynamic_linear_velocity_with_rotation(JPH::BodyID dynamicid, Vector3 dynamic_velocity, Vector3 dynamic_rotation);
+    void add_dynamic_linear_velocity_with_rotation(JPH::BodyID dynamicid, Vector3 dynamic_velocity, Vector3 dynamic_rotation);
     void start_simulation();
     bool update(float cDeltaTime, Vector3 &body_position, Vector3 &body_rotation, JPH::BodyID body_id);
     void cleanup();
@@ -243,7 +252,7 @@ private:
     std::unique_ptr<ObjectLayerPairFilterImpl> _object_vs_object_layer_filter;
     std::vector<JPH::BodyID> _static_ids;
     std::vector<JPH::BodyID> _dynamic_ids;
+    std::vector<JPH::BodyID> _kinematic_ids;
+    std::vector<JPH::BodyID> _sensor_ids;
     JPH::BodyID _floor_id;
 };
-
-#endif

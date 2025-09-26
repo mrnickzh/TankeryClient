@@ -8,10 +8,6 @@
 // any other Jolt header. You can use Jolt.h in your precompiled header to speed
 // up compilation.
 #include <Jolt/Jolt.h> // NOLINT [misc-include-cleaner]
-
-// Jolt includes
-#include <Jolt/Core/Core.h>
-#include <Jolt/Core/Factory.h>
 #include <Jolt/Core/IssueReporting.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
@@ -25,17 +21,22 @@
 #include <Jolt/Physics/Body/MotionType.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
-#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/CompoundShape.h>
 #include <Jolt/Physics/EActivation.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Vehicle/VehicleConstraint.h>
+#include <Jolt/Physics/Body/BodyLockMulti.h>
+
 #include <raylib.h>
 
 // STL includes
 #include <cstdarg>
 #include <iostream>
 #include <memory>
+#include <raymath.h>
 #include <thread>
 
 // Disable common warnings triggered by Jolt, you can use
@@ -47,6 +48,8 @@
 // to get a Real value that compiles to double or float depending if
 // JPH_DOUBLE_PRECISION is set or not.
 using namespace JPH::literals;
+
+JPH::Vec3 AxisEnum[3] = { JPH::Vec3::sAxisX(), JPH::Vec3::sAxisY(), JPH::Vec3::sAxisZ() };
 
 // Callback for traces, connect this to your own trace function if you have one
 static void TraceImpl(const char *inFMT, ...)
@@ -131,7 +134,7 @@ void PhysicsEngine::initialise()
     // system. If you try to add more you'll get an error. Note: This value is low
     // because this is a simple test. For a real project use something in the
     // order of 65536.
-    constexpr JPH::uint cMaxBodies = 1'024;
+    constexpr JPH::uint cMaxBodies = 65'536;
 
     // This determines how many mutexes to allocate to protect rigid bodies from
     // concurrent access. Set it to 0 for the default settings.
@@ -144,14 +147,14 @@ void PhysicsEngine::initialise()
     // start to do narrow phase work. This is slightly less efficient. Note: This
     // value is low because this is a simple test. For a real project use
     // something in the order of 65536.
-    constexpr JPH::uint cMaxBodyPairs = 1'024;
+    constexpr JPH::uint cMaxBodyPairs = 65'536;
 
     // This is the maximum size of the contact constraint buffer. If more contacts
     // (collisions between bodies) are detected than this number then these
     // contacts will be ignored and bodies will start interpenetrating / fall
     // through the world. Note: This value is low because this is a simple test.
     // For a real project use something in the order of 10240.
-    constexpr JPH::uint cMaxContactConstraints = 1'024;
+    constexpr JPH::uint cMaxContactConstraints = 65'536;
 
     // Create mapping table from object layer to broadphase layer
     // Note: As this is an interface, PhysicsSystem will take a reference to this
@@ -248,7 +251,6 @@ JPH::BodyID PhysicsEngine::create_floor(const Vector3 &floor_dimensions,
     body_interface.AddBody(floor->GetID(), JPH::EActivation::DontActivate);
 
     _floor_id = floor->GetID();
-    //body_interface.SetFriction(_floor_id, 1.F);
     return _floor_id;
 }
 
@@ -294,28 +296,95 @@ JPH::BodyID PhysicsEngine::create_dynamic(const Vector3 &dynamic_dimensions,
     return dynamic_id;
 }
 
-void PhysicsEngine::set_dynamic_linear_velocity(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity) {
+JPH::BodyID PhysicsEngine::create_kinematic(const Vector3 &kinematic_dimensions,
+                                const Vector3 &kinematic_positon,
+                                const Vector3 &kinematic_rotation)
+{
+    // Now create a dynamic body to bounce on the floor
+    // Note that this uses the shorthand version of creating and adding a body to
+    // the world
+    const JPH::BodyCreationSettings kinematic_settings(
+        new JPH::BoxShape(JPH::Vec3(kinematic_dimensions.x, kinematic_dimensions.y, kinematic_dimensions.z)),
+        //JPH::RVec3(0.0_r, 2.0_r, 0.0_r),
+        JPH::RVec3(kinematic_positon.x, kinematic_positon.y, kinematic_positon.z),
+        JPH::Quat::sEulerAngles(JPH::RVec3(kinematic_rotation.x * DEG2RAD, kinematic_rotation.y * DEG2RAD, kinematic_rotation.z * DEG2RAD)),
+        JPH::EMotionType::Kinematic,
+        Layers::MOVING);
+    JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
+    JPH::BodyID kinematic_id = body_interface.CreateAndAddBody(kinematic_settings,
+                                                 JPH::EActivation::Activate);
+    _kinematic_ids.push_back(kinematic_id);
+    return kinematic_id;
+}
+
+JPH::BodyID PhysicsEngine::create_sensor(const Vector3 &sensor_dimensions,
+                                const Vector3 &sensor_positon,
+                                const Vector3 &sensor_rotation)
+{
+    // Now create a dynamic body to bounce on the floor
+    // Note that this uses the shorthand version of creating and adding a body to
+    // the world
+    const JPH::BodyCreationSettings sensor_settings(
+        new JPH::BoxShape(JPH::Vec3(sensor_dimensions.x, sensor_dimensions.y, sensor_dimensions.z)),
+        //JPH::RVec3(0.0_r, 2.0_r, 0.0_r),
+        JPH::RVec3(sensor_positon.x, sensor_positon.y, sensor_positon.z),
+        JPH::Quat::sEulerAngles(JPH::RVec3(sensor_rotation.x * DEG2RAD, sensor_rotation.y * DEG2RAD, sensor_rotation.z * DEG2RAD)),
+        JPH::EMotionType::Static,
+        Layers::MOVING);
+    JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
+    JPH::Body *sensor = body_interface.CreateBody(sensor_settings);
+    sensor->SetIsSensor(true);
+    JPH::BodyID sensor_id = sensor->GetID();
+    body_interface.AddBody(sensor_id, JPH::EActivation::Activate);
+    _sensor_ids.push_back(sensor_id);
+    return sensor_id;
+}
+
+void PhysicsEngine::create_hinge(const Vector3 &hinge_position,
+                                const JPH::BodyID &body1_id,
+                                const JPH::BodyID &body2_id, int hingeaxis, int normalaxis)
+{
+    JPH::HingeConstraintSettings hinge_settings;
+    hinge_settings.mPoint1 = hinge_settings.mPoint2 = JPH::Vec3(hinge_position.x, hinge_position.y, hinge_position.z);
+    hinge_settings.mHingeAxis1 = hinge_settings.mHingeAxis2 = AxisEnum[hingeaxis];
+    hinge_settings.mNormalAxis1 = hinge_settings.mNormalAxis2 = AxisEnum[normalaxis];
+    JPH::BodyID body_ids[] = { body1_id, body2_id };
+    JPH::BodyLockMultiWrite lock(_physics_system->GetBodyLockInterface(), body_ids, 2);
+    JPH::Body* body1 = lock.GetBody(0);
+    JPH::Body* body2 = lock.GetBody(1);
+    JPH::HingeConstraint* hinge_constraint = dynamic_cast<JPH::HingeConstraint*>(hinge_settings.Create(*body1, *body2));
+    _physics_system->AddConstraint(hinge_constraint);
+}
+
+void PhysicsEngine::create_tracked_chassis(const Vector3 &hinge_position,
+                                const JPH::BodyID &body1_id,
+                                const JPH::BodyID &body2_id, int hingeaxis, int normalaxis)
+{
+    JPH::VehicleConstraintSettings vehicle;
+}
+
+void PhysicsEngine::set_dynamic_linear_velocity(JPH::BodyID dynamicid, const Vector3 dynamic_velocity) {
     JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
     body_interface.SetLinearVelocity(
         dynamicid,
         JPH::Vec3(dynamic_velocity.x, dynamic_velocity.y, dynamic_velocity.z));
 }
 
-void PhysicsEngine::set_dynamic_angular_velocity(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity) {
+void PhysicsEngine::set_dynamic_angular_velocity(JPH::BodyID dynamicid, const Vector3 dynamic_velocity) {
     JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
     body_interface.SetAngularVelocity(
         dynamicid,
         JPH::Vec3(dynamic_velocity.x * DEG2RAD, dynamic_velocity.y * DEG2RAD, dynamic_velocity.z * DEG2RAD));
 }
 
-void PhysicsEngine::add_dynamic_linear_velocity(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity) {
+void PhysicsEngine::add_dynamic_linear_velocity(JPH::BodyID dynamicid, const Vector3 dynamic_velocity) {
     JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
     body_interface.AddLinearVelocity(
         dynamicid,
         JPH::Vec3(dynamic_velocity.x, dynamic_velocity.y, dynamic_velocity.z));
 }
 
-void PhysicsEngine::add_dynamic_angular_velocity(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity) {
+void PhysicsEngine::add_dynamic_angular_velocity(JPH::BodyID dynamicid, const Vector3 dynamic_velocity) {
     JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
     body_interface.AddAngularImpulse(
         dynamicid,
@@ -334,7 +403,7 @@ Vector3 PhysicsEngine::get_dynamic_angular_velocity(JPH::BodyID dynamicid) {
     return Vector3(angularvelocity.GetX() * RAD2DEG, angularvelocity.GetY() * RAD2DEG, angularvelocity.GetZ() * RAD2DEG);
 }
 
-void PhysicsEngine::set_body_position(JPH::BodyID bodyid, const Vector3 &position) {
+void PhysicsEngine::set_body_position(JPH::BodyID bodyid, const Vector3 position) {
     JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
     body_interface.SetPosition(
         bodyid,
@@ -342,7 +411,7 @@ void PhysicsEngine::set_body_position(JPH::BodyID bodyid, const Vector3 &positio
         JPH::EActivation::Activate);
 }
 
-void PhysicsEngine::set_body_rotation(JPH::BodyID bodyid, const Vector3 &rotation) {
+void PhysicsEngine::set_body_rotation(JPH::BodyID bodyid, const Vector3 rotation) {
     JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
     body_interface.SetRotation(
         bodyid,
@@ -363,25 +432,42 @@ Vector3 PhysicsEngine::get_body_rotation(JPH::BodyID bodyid) {
     return Vector3(eulerrotation.GetX() * RAD2DEG, eulerrotation.GetY() * RAD2DEG, eulerrotation.GetZ() * RAD2DEG);
 }
 
-void PhysicsEngine::set_dynamic_linear_velocity_with_rotation(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity, const Vector3 &dynamic_rotation) {
+Vector3 PhysicsEngine::get_body_cofm(JPH::BodyID bodyid) {
+    JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
+    JPH::Vec3 cofm = body_interface.GetCenterOfMassPosition(bodyid);
+    return Vector3(cofm.GetX(), cofm.GetY(), cofm.GetZ());
+}
+
+void PhysicsEngine::set_dynamic_linear_velocity_with_rotation(JPH::BodyID dynamicid, const Vector3 dynamic_velocity, const Vector3 dynamic_rotation) {
     float yawRad = dynamic_rotation.y * DEG2RAD;
-    float dx = std::sin(yawRad);
-    float dz = std::cos(yawRad);
+    float pitchRad = dynamic_rotation.x * DEG2RAD;
+
+    Vector3 real_velocity = Vector3(0, 0, 0);
+    real_velocity.x = dynamic_velocity.x * std::sin(yawRad) * std::cos(pitchRad);
+    real_velocity.y = dynamic_velocity.y * std::sin(pitchRad);
+    real_velocity.z = dynamic_velocity.z * std::cos(yawRad) * std::cos(pitchRad);
+
     JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
     body_interface.SetLinearVelocity(
         dynamicid,
-        JPH::Vec3(dynamic_velocity.x * dz, dynamic_velocity.y, dynamic_velocity.z * -dx));
+        JPH::Vec3(real_velocity.z, real_velocity.y, real_velocity.x));
 }
 
-void PhysicsEngine::add_dynamic_linear_velocity_with_rotation(JPH::BodyID dynamicid, const Vector3 &dynamic_velocity, const Vector3 &dynamic_rotation) {
+void PhysicsEngine::add_dynamic_linear_velocity_with_rotation(JPH::BodyID dynamicid, const Vector3 dynamic_velocity, const Vector3 dynamic_rotation) {
     float yawRad = dynamic_rotation.y * DEG2RAD;
-    float dx = std::sin(yawRad);
-    float dz = std::cos(yawRad);
-    std::cout << dx << ", " << dz << std::endl;
+    float pitchRad = dynamic_rotation.x * DEG2RAD;
+
+    Vector3 real_velocity = Vector3(0, 0, 0);
+    real_velocity.x = dynamic_velocity.x * std::sin(yawRad) * std::cos(pitchRad);
+    real_velocity.y = dynamic_velocity.y * std::sin(pitchRad);
+    real_velocity.z = dynamic_velocity.z * std::cos(yawRad) * std::cos(pitchRad);
+
+    std::cout << real_velocity.x << " " << real_velocity.y << " " << real_velocity.z << std::endl;
+
     JPH::BodyInterface &body_interface = _physics_system->GetBodyInterface();
     body_interface.AddLinearVelocity(
         dynamicid,
-        JPH::Vec3(dynamic_velocity.x * dz, dynamic_velocity.y, dynamic_velocity.z * -dx));
+        JPH::Vec3(real_velocity.z, real_velocity.y, real_velocity.x));
 }
 
 void PhysicsEngine::start_simulation()
@@ -397,7 +483,7 @@ bool PhysicsEngine::update(const float cDeltaTime, Vector3 &body_position, Vecto
         _physics_system->GetBodyInterface()};
     if (!body_interface.IsActive(body_id))
     {
-        std::cout << "Body " << body_id.GetIndex() << " is not active" << std::endl;
+        //std::cout << "Body " << body_id.GetIndex() << " is not active" << std::endl;
         return false;
     }
 
@@ -407,7 +493,7 @@ bool PhysicsEngine::update(const float cDeltaTime, Vector3 &body_position, Vecto
     const JPH::Quat rotation{
         body_interface.GetRotation(body_id)};
     const JPH::Vec3 velocity{body_interface.GetLinearVelocity(body_id)};
-    std::cout << "Body " << body_id.GetIndex() << " Step " << _step << ": Position = (" << position.GetX() << ", " << position.GetY() << ", " << position.GetZ() << "), Velocity = (" << velocity.GetX() << ", " << velocity.GetY() << ", " << velocity.GetZ() << ")\n" << std::endl;
+    //std::cout << "Body " << body_id.GetIndex() << " Step " << _step << ": Position = (" << position.GetX() << ", " << position.GetY() << ", " << position.GetZ() << "), Velocity = (" << velocity.GetX() << ", " << velocity.GetY() << ", " << velocity.GetZ() << ")\n" << std::endl;
 
     body_position =
         Vector3{position.GetX(), position.GetY(), position.GetZ()};
@@ -441,6 +527,24 @@ void PhysicsEngine::cleanup()
     }
 
     for (JPH::BodyID id : _dynamic_ids) {
+        // Remove the sphere from the physics system. Note that the sphere itself
+        // keeps all of its state and can be re-added at any time.
+        body_interface.RemoveBody(id);
+
+        // Destroy the sphere. After this the sphere ID is no longer valid.
+        body_interface.DestroyBody(id);
+    }
+
+    for (JPH::BodyID id : _kinematic_ids) {
+        // Remove the sphere from the physics system. Note that the sphere itself
+        // keeps all of its state and can be re-added at any time.
+        body_interface.RemoveBody(id);
+
+        // Destroy the sphere. After this the sphere ID is no longer valid.
+        body_interface.DestroyBody(id);
+    }
+
+    for (JPH::BodyID id : _sensor_ids) {
         // Remove the sphere from the physics system. Note that the sphere itself
         // keeps all of its state and can be re-added at any time.
         body_interface.RemoveBody(id);

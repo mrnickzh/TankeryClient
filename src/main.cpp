@@ -47,6 +47,10 @@ void setupAndRender() {
     Main::objects.insert(Main::objects.end(), Main::map.begin(), Main::map.end());
     Main::objects.push_back(Main::localTank->object);
 
+    // for (auto& e : Main::localTank->armorplates) {
+    //     Main::objects.push_back(e);
+    // }
+
     for (auto& e : Main::entities) {
         Main::objects.push_back(e->object);
     }
@@ -79,20 +83,23 @@ void mainLoop() {
     auto cv = Main::physicsEngine.get_dynamic_linear_velocity(bodyid);
     auto cp = Main::physicsEngine.get_body_position(bodyid);
     auto cr = Main::physicsEngine.get_body_rotation(bodyid);
+    auto ca = Main::physicsEngine.get_dynamic_angular_velocity(bodyid);
     bool moved = false;
 
     if (IsKeyDown(KEY_W)) {
-        if (cv.z < 5.0f && cv.x < 5.0f) { Main::physicsEngine.add_dynamic_linear_velocity_with_rotation(bodyid, Vector3(0.1f, 0.0f, 0.1f), cr); moved = true; }
+        if (cv.z < 5.0f && cv.x < 5.0f) { Main::physicsEngine.add_dynamic_linear_velocity_with_rotation(bodyid, Vector3(0.1f, 0.1f, 0.1f), cr); moved = true; }
     }
     if (IsKeyDown(KEY_S)) {
-        if (cv.z > -5.0f && cv.x > -5.0f) { Main::physicsEngine.add_dynamic_linear_velocity_with_rotation(bodyid, Vector3(-0.1f, 0.0f, -0.1f), cr); moved = true; }
+        if (cv.z > -5.0f && cv.x > -5.0f) { Main::physicsEngine.add_dynamic_linear_velocity_with_rotation(bodyid, Vector3(-0.1f, -0.1f, -0.1f), cr); moved = true; }
     }
-    if (IsKeyDown(KEY_A)) { Main::physicsEngine.set_body_rotation(bodyid, Vector3(cr.x, cr.y + 0.1f, cr.z)); moved = true; }
-    if (IsKeyDown(KEY_D)) { Main::physicsEngine.set_body_rotation(bodyid, Vector3(cr.x, cr.y - 0.1f, cr.z)); moved = true; }
+    if (IsKeyDown(KEY_A)) { Main::physicsEngine.set_dynamic_angular_velocity(bodyid, Vector3(0.0f, 20.0f, 0.0f)); moved = true; }
+    if (IsKeyDown(KEY_D)) { Main::physicsEngine.set_dynamic_angular_velocity(bodyid, Vector3(0.0f, -20.0f, 0.0f)); moved = true; }
     if (moved) { PlayerAuthInput pkt; SocketClient::sendPacket(&pkt); std::cout << "PAI sent" << std::endl; }
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
+
+    Vector3 cofm = Main::physicsEngine.get_body_cofm(bodyid);
 
     std::string velocityText = "Velocity x: " + std::to_string(cv.x) +
                            " y: " + std::to_string(cv.y) +
@@ -103,9 +110,17 @@ void mainLoop() {
     std::string rotationText = "Rotation x: " + std::to_string(cr.x) +
                        " y: " + std::to_string(cr.y) +
                        " z: " + std::to_string(cr.z);
+    std::string angularText = "Angular x: " + std::to_string(ca.x) +
+                      " y: " + std::to_string(ca.y) +
+                      " z: " + std::to_string(ca.z);
+    std::string cofmText = "CofM x: " + std::to_string(cofm.x) +
+                      " y: " + std::to_string(cofm.y) +
+                      " z: " + std::to_string(cofm.z);
     DrawText(velocityText.c_str(), 10, 10, 10, BLACK);
     DrawText(positionText.c_str(), 10, 20, 10, BLACK);
     DrawText(rotationText.c_str(), 10, 30, 10, BLACK);
+    DrawText(angularText.c_str(), 10, 40, 10, BLACK);
+    DrawText(cofmText.c_str(), 10, 50, 10, BLACK);
 
     BeginMode3D(camera);
 
@@ -175,8 +190,15 @@ int main() {
 
     Main::localTank = new LocalTank();
     Main::localTank->object = std::make_shared<DynamicObject>(Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 5.0f, 0.0f), std::make_shared<Model>(cubeModel), BLUE);
+    Armor armor = Armor(1.0f, 100.0f);
+    Mesh armorMesh = GenMeshCube(armor.thickness / 1000, 1.0f, 1.0f);
+    Model armorModel = LoadModelFromMesh(armorMesh);
+    Main::localTank->add_armor(std::make_shared<ArmorObject>(Vector3(0.0f, 0.0f, 0.0f), Vector3(0.0f, 0.0f, 0.0f), std::make_shared<Model>(armorModel), YELLOW, armor, Main::localTank->object, Vector3(2.0f, 0, 0), Vector3(0.0f, 0.0f, 0.0f)));
     Main::localTank->object->create_physics();
 
+    // for (auto& e : Main::localTank->armorplates) {
+    //     e->create_physics();
+    // }
 
     emscripten_set_main_loop(mainLoop, 0, 1);
     ticklooprunning = false;

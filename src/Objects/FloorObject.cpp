@@ -1,6 +1,5 @@
 #include "FloorObject.hpp"
 
-#include <iostream>
 #include <raymath.h>
 
 #include "../main.hpp"

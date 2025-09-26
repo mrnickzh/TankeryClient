@@ -20,17 +20,21 @@ public:
     }
 
     void send(ByteBuf &buffer) override {
-        buffer.writeFloat(Main::localTank->object->position.x);
-        buffer.writeFloat(Main::localTank->object->position.y);
-        buffer.writeFloat(Main::localTank->object->position.z);
+        auto localid = Main::localTank->object->bodyid;
+        Vector3 position = Main::physicsEngine.get_body_position(localid);
+        Vector3 rotation = Main::physicsEngine.get_body_rotation(localid);
+        Vector3 velocity = Main::physicsEngine.get_dynamic_linear_velocity(localid);
 
-        buffer.writeFloat(Main::localTank->object->rotation.x);
-        buffer.writeFloat(Main::localTank->object->rotation.y);
-        buffer.writeFloat(Main::localTank->object->rotation.z);
+        buffer.writeFloat(position.x);
+        buffer.writeFloat(position.y);
+        buffer.writeFloat(position.z);
 
-        auto vel = Main::physicsEngine.get_dynamic_linear_velocity(Main::localTank->object->bodyid);
-        buffer.writeFloat(vel.x);
-        buffer.writeFloat(vel.y);
-        buffer.writeFloat(vel.z);
+        buffer.writeFloat(rotation.x);
+        buffer.writeFloat(rotation.y);
+        buffer.writeFloat(rotation.z);
+
+        buffer.writeFloat(velocity.x);
+        buffer.writeFloat(velocity.y);
+        buffer.writeFloat(velocity.z);
     }
 };
